@@ -194,3 +194,51 @@ fn test_batch_sizes() {
     let _quantities = Vec::from_array(&env, [1; 9]);
     // Expect contract error due to batch size limit
 }
+
+#[test]
+fn test_audit_and_sustainability_and_anomaly_and_shared_lib() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, NebulaNomadContract);
+    let client = NebulaNomadContractClient::new(&env, &contract_id);
+
+    let player = Address::generate(&env);
+
+    // Audit logging
+    let details = BytesN::from_array(&env, &[1u8; 128]);
+    let entry = client.log_audit_event(&Some(player.clone()), &symbol_short!("test_action"), &details).unwrap();
+    assert_eq!(entry.id, 0);
+    assert_eq!(client.get_audit_count(), 1);
+
+    let audits = client.query_audit_logs(&symbol_short!("test_action"), &10);
+    assert_eq!(audits.len(), 1);
+    assert_eq!(audits.get(0).unwrap().action, symbol_short!("test_action"));
+
+    // Sustainability: low footprint gets reward
+    client.record_transaction_footprint(&player, &5000).unwrap();
+    let footprint = client.get_footprint(&player);
+    assert_eq!(footprint.gas_used, 5000);
+    let reward = client.claim_sustainability_reward(&player).unwrap();
+    assert_eq!(reward, 50);
+
+    // Sustainability: once claimed, no reward
+    assert_eq!(client.claim_sustainability_reward(&player).is_err(), true);
+
+    // Anomaly classification
+    let classified = client.classify_anomaly(&1, &Vec::from_array(&env, [120u32, 5u32, 10u32]));
+    assert!(classified.is_ok());
+    let classification = classified.unwrap();
+    assert_eq!(classification.anomaly_type, symbol_short!("wormhole"));
+
+    // refine
+    let refined = client.refine_classification(&1, &Vec::from_array(&env, [200u32])).unwrap();
+    assert!(refined.confidence <= 100);
+
+    let loaded = client.get_classification(&1).unwrap();
+    assert_eq!(loaded.anomaly_id, 1);
+
+    // shared lib operations
+    assert!(client.validate_address(&player).is_ok());
+
+    let calc = client.calculate_yield(&100, &3).unwrap();
+    assert_eq!(calc, 300);
+}

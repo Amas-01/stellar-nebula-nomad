@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec, symbol_short};
 
 mod blueprint_factory;
 mod nebula_explorer;
@@ -33,6 +33,10 @@ mod energy_manager;
 mod environment_simulator;
 mod mission_generator;
 mod escrow_trader;
+mod audit_logger;
+mod sustainability_metrics;
+mod anomaly_classifier;
+mod shared_lib;
 
 pub use nebula_explorer::{
     calculate_rarity_tier, compute_layout_hash, generate_nebula_layout, CellType, NebulaCell,
@@ -107,6 +111,10 @@ pub use escrow_trader::{
     cancel_escrow, complete_escrow, confirm_escrow, get_escrow, initiate_escrow, Escrow,
     EscrowError, EscrowResult, TradeAsset,
 };
+pub use audit_logger::{AuditEntry, AuditLoggerError, get_audit_count, log_audit_event, query_audit_logs};
+pub use sustainability_metrics::{claim_sustainability_reward, get_footprint, record_transaction_footprint, FootprintRecord, SustainabilityError};
+pub use anomaly_classifier::{classify_anomaly, classify_batch, get_classification, refine_classification, AnomalyError, ClassificationRecord};
+pub use shared_lib::{calculate_yield, validate_address, SharedError};
 
 #[contract]
 pub struct NebulaNomadContract;
@@ -189,11 +197,17 @@ impl NebulaNomadContract {
     }
 
     pub fn post_bounty(env: Env, poster: Address, description: String, reward: i128) -> Bounty {
-        bounty_board::post_bounty(&env, &poster, description, reward).unwrap()
+        let result = bounty_board::post_bounty(&env, &poster, description, reward).unwrap();
+        let _ = audit_logger::log_audit_event(&env, Some(&poster), symbol_short!("pb"), BytesN::from_array(&env, &[0u8; 128]));
+        result
     }
 
     pub fn claim_bounty(env: Env, claimer: Address, bounty_id: u64, proof: BytesN<32>) -> Bounty {
-        bounty_board::claim_bounty(&env, &claimer, bounty_id, proof).unwrap()
+        let result = bounty_board::claim_bounty(&env, &claimer, bounty_id, proof).unwrap();
+        let mut b = [0u8; 128];
+        b[0..8].copy_from_slice(&bounty_id.to_be_bytes());
+        let _ = audit_logger::log_audit_event(&env, Some(&claimer), symbol_short!("cb"), BytesN::from_array(&env, &b));
+        result
     }
 
     // === Recycling/Crafting API ===
@@ -203,11 +217,17 @@ impl NebulaNomadContract {
     }
 
     pub fn recycle_resource(env: Env, caller: Address, resource: Symbol, amount: u32) -> Vec<(Symbol, u32)> {
-        recycling_crafter::recycle_resource(&env, &caller, resource, amount).unwrap()
+        let result = recycling_crafter::recycle_resource(&env, &caller, resource, amount).unwrap();
+        let _ = audit_logger::log_audit_event(&env, Some(&caller), symbol_short!("rr"), BytesN::from_array(&env, &[0u8; 128]));
+        result
     }
 
     pub fn craft_new_item(env: Env, caller: Address, recipe_id: u64, inputs: Vec<Symbol>, quantities: Vec<u32>) -> CraftingResult {
-        recycling_crafter::craft_new_item(&env, &caller, recipe_id, inputs, quantities).unwrap()
+        let result = recycling_crafter::craft_new_item(&env, &caller, recipe_id, inputs, quantities).unwrap();
+        let mut b = [0u8; 128];
+        b[0..8].copy_from_slice(&recipe_id.to_be_bytes());
+        let _ = audit_logger::log_audit_event(&env, Some(&caller), symbol_short!("cn"), BytesN::from_array(&env, &b));
+        result
     }
 
     pub fn get_recipe(env: Env, recipe_id: u64) -> Recipe {
@@ -222,7 +242,12 @@ impl NebulaNomadContract {
         ship_type: Symbol,
         metadata: Bytes,
     ) -> Result<ShipNft, ShipError> {
-        ship_nft::mint_ship(&env, &owner, &ship_type, &metadata)
+        let result = ship_nft::mint_ship(&env, &owner, &ship_type, &metadata);
+        if result.is_ok() {
+            let details = BytesN::from_array(&env, &[0u8; 128]);
+            let _ = audit_logger::log_audit_event(&env, Some(&owner), symbol_short!("ms"), details);
+        }
+        result
     }
 
     /// Batch-mint up to 3 ship NFTs in one transaction.
@@ -232,7 +257,12 @@ impl NebulaNomadContract {
         ship_types: Vec<Symbol>,
         metadata: Bytes,
     ) -> Result<Vec<ShipNft>, ShipError> {
-        ship_nft::batch_mint_ships(&env, &owner, &ship_types, &metadata)
+        let result = ship_nft::batch_mint_ships(&env, &owner, &ship_types, &metadata);
+        if result.is_ok() {
+            let details = BytesN::from_array(&env, &[0u8; 128]);
+            let _ = audit_logger::log_audit_event(&env, Some(&owner), symbol_short!("bms"), details);
+        }
+        result
     }
 
     /// Transfer ship ownership to `new_owner`.
@@ -241,7 +271,14 @@ impl NebulaNomadContract {
         ship_id: u64,
         new_owner: Address,
     ) -> Result<ShipNft, ShipError> {
-        ship_nft::transfer_ownership(&env, ship_id, &new_owner)
+        let result = ship_nft::transfer_ownership(&env, ship_id, &new_owner);
+        if result.is_ok() {
+            let mut b = [0u8; 128];
+            b[0..8].copy_from_slice(&ship_id.to_be_bytes());
+            let details = BytesN::from_array(&env, &b);
+            let _ = audit_logger::log_audit_event(&env, Some(&new_owner), symbol_short!("to"), details);
+        }
+        result
     }
 
     /// Read a ship by ID.
@@ -305,12 +342,24 @@ impl NebulaNomadContract {
         ship_id: u64,
         amount: u64,
     ) -> Result<TreasureVault, VaultError> {
-        treasure_vault::deposit_treasure(&env, &owner, ship_id, amount)
+        let result = treasure_vault::deposit_treasure(&env, &owner, ship_id, amount);
+        if result.is_ok() {
+            let mut b = [0u8; 128];
+            b[0..8].copy_from_slice(&ship_id.to_be_bytes());
+            let _ = audit_logger::log_audit_event(&env, Some(&owner), symbol_short!("dt"), BytesN::from_array(&env, &b));
+        }
+        result
     }
 
     /// Claim a treasure vault after the lock period expires.
     pub fn claim_treasure(env: Env, owner: Address, vault_id: u64) -> Result<u64, VaultError> {
-        treasure_vault::claim_treasure(&env, &owner, vault_id)
+        let result = treasure_vault::claim_treasure(&env, &owner, vault_id);
+        if result.is_ok() {
+            let mut b = [0u8; 128];
+            b[0..8].copy_from_slice(&vault_id.to_be_bytes());
+            let _ = audit_logger::log_audit_event(&env, Some(&owner), symbol_short!("ct"), BytesN::from_array(&env, &b));
+        }
+        result
     }
 
     /// Read a vault by ID.
@@ -773,5 +822,94 @@ impl NebulaNomadContract {
     /// Clear the player's pending batch queue.
     pub fn clear_batch(env: Env, player: Address) {
         batch_processor::clear_batch(&env, &player)
+    }
+
+    // ─── On-chain Audit Logging (Issue #64) ───────────────────────────────
+
+    pub fn log_audit_event(
+        env: Env,
+        actor: Option<Address>,
+        action: Symbol,
+        details: BytesN<128>,
+    ) -> Result<AuditEntry, AuditLoggerError> {
+        audit_logger::log_audit_event(&env, actor.as_ref(), action, details)
+    }
+
+    pub fn query_audit_logs(env: Env, filter: Symbol, limit: u32) -> Vec<AuditEntry> {
+        audit_logger::query_audit_logs(&env, filter, limit)
+    }
+
+    pub fn get_audit_count(env: Env) -> u64 {
+        audit_logger::get_audit_count(&env)
+    }
+
+    // ─── Sustainability and Carbon Tracking (Issue #68) ──────────────────
+
+    pub fn record_transaction_footprint(
+        env: Env,
+        player: Address,
+        gas_used: u64,
+    ) -> Result<FootprintRecord, SustainabilityError> {
+        let record = sustainability_metrics::record_transaction_footprint(&env, &player, gas_used)?;
+        let mut details_bytes = [0u8; 128];
+        details_bytes[0..8].copy_from_slice(&record.gas_used.to_be_bytes());
+        let details = BytesN::from_array(&env, &details_bytes);
+        let _ = audit_logger::log_audit_event(&env, Some(&player), symbol_short!("ec"), details);
+        Ok(record)
+    }
+
+    pub fn claim_sustainability_reward(
+        env: Env,
+        player: Address,
+    ) -> Result<i128, SustainabilityError> {
+        let reward = sustainability_metrics::claim_sustainability_reward(&env, &player)?;
+        let mut details_bytes = [0u8; 128];
+        details_bytes[0..8].copy_from_slice(&(reward as i64).to_be_bytes());
+        let details = BytesN::from_array(&env, &details_bytes);
+        let _ = audit_logger::log_audit_event(&env, Some(&player), symbol_short!("er"), details);
+        Ok(reward)
+    }
+
+    pub fn get_footprint(env: Env, player: Address) -> FootprintRecord {
+        sustainability_metrics::get_footprint(&env, &player)
+    }
+
+    // ─── Cosmic Anomaly Classification Engine (Issue #70) ────────────────
+
+    pub fn classify_anomaly(
+        env: Env,
+        anomaly_id: u64,
+        features: Vec<u32>,
+    ) -> Result<ClassificationRecord, AnomalyError> {
+        anomaly_classifier::classify_anomaly(&env, anomaly_id, features)
+    }
+
+    pub fn refine_classification(
+        env: Env,
+        anomaly_id: u64,
+        new_data: Vec<u32>,
+    ) -> Result<ClassificationRecord, AnomalyError> {
+        anomaly_classifier::refine_classification(&env, anomaly_id, new_data)
+    }
+
+    pub fn classify_batch(
+        env: Env,
+        items: Vec<(u64, Vec<u32>)>,
+    ) -> Vec<ClassificationRecord> {
+        anomaly_classifier::classify_batch(&env, items)
+    }
+
+    pub fn get_classification(env: Env, anomaly_id: u64) -> Option<ClassificationRecord> {
+        anomaly_classifier::get_classification(&env, anomaly_id)
+    }
+
+    // ─── Shared Reusability Library (Issue #67) ──────────────────────────
+
+    pub fn validate_address(env: Env, auth: Address) -> Result<(), SharedError> {
+        shared_lib::validate_address(&env, auth)
+    }
+
+    pub fn calculate_yield(env: Env, base: i128, multiplier: u32) -> Result<i128, SharedError> {
+        shared_lib::calculate_yield(base, multiplier)
     }
 }
