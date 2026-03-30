@@ -28,7 +28,7 @@ pub enum EventKey {
 // ─── Data Types ───────────────────────────────────────────────────────────────
 
 /// Scheduled event record.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct ScheduledEvent {
     pub event_id: u64,
@@ -41,7 +41,7 @@ pub struct ScheduledEvent {
 }
 
 /// Event execution result.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[contracttype]
 pub struct EventResult {
     pub event_id: u64,

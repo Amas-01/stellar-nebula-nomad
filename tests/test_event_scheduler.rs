@@ -1,8 +1,10 @@
 #![cfg(test)]
 
-use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Symbol};
+use soroban_sdk::{symbol_short, testutils::{Address as _, Ledger}, Address, Env};
 use stellar_nebula_nomad::{
-    EventError, EventResult, ScheduledEvent, MAX_ACTIVE_EVENTS, WEEKLY_FESTIVAL_INTERVAL,
+    initialize_scheduler, schedule_event, trigger_scheduled_event, get_event,
+    get_active_events, schedule_weekly_festival, cancel_event, update_participants,
+    get_event_count, EventError, MAX_ACTIVE_EVENTS, WEEKLY_FESTIVAL_INTERVAL,
 };
 
 fn create_test_env() -> (Env, Address) {
@@ -16,12 +18,12 @@ fn create_test_env() -> (Env, Address) {
 fn test_initialize_scheduler() {
     let (env, admin) = create_test_env();
     
-    stellar_nebula_nomad::NebulaNomadContract::initialize_scheduler(env.clone(), admin.clone());
+    initialize_scheduler(&env, &admin);
     
-    let count = stellar_nebula_nomad::NebulaNomadContract::get_event_count(env.clone());
+    let count = get_event_count(&env);
     assert_eq!(count, 0);
     
-    let active = stellar_nebula_nomad::NebulaNomadContract::get_active_events(env.clone());
+    let active = get_active_events(&env);
     assert_eq!(active.len(), 0);
 }
 
@@ -29,14 +31,14 @@ fn test_initialize_scheduler() {
 fn test_schedule_event_success() {
     let (env, admin) = create_test_env();
     
-    stellar_nebula_nomad::NebulaNomadContract::initialize_scheduler(env.clone(), admin.clone());
+    initialize_scheduler(&env, &admin);
     
     let current_time = env.ledger().timestamp();
     let start_time = current_time + 3600; // 1 hour from now
     let reward_pool = 10000i128;
     
-    let event_id = stellar_nebula_nomad::NebulaNomadContract::schedule_event(
-        env.clone(),
+    let event_id = schedule_event(
+        &env,
         admin.clone(),
         symbol_short!("festival"),
         start_time,
@@ -46,14 +48,14 @@ fn test_schedule_event_success() {
     
     assert_eq!(event_id, 1);
     
-    let event = stellar_nebula_nomad::NebulaNomadContract::get_event(env.clone(), event_id).unwrap();
+    let event = get_event(&env, event_id).unwrap();
     assert_eq!(event.event_id, 1);
     assert_eq!(event.event_type, symbol_short!("festival"));
     assert_eq!(event.start_time, start_time);
     assert_eq!(event.reward_pool, reward_pool);
     assert_eq!(event.executed, false);
     
-    let active = stellar_nebula_nomad::NebulaNomadContract::get_active_events(env.clone());
+    let active = get_active_events(&env);
     assert_eq!(active.len(), 1);
     assert_eq!(active.get(0).unwrap(), 1);
 }
@@ -62,13 +64,13 @@ fn test_schedule_event_success() {
 fn test_schedule_event_past_time_fails() {
     let (env, admin) = create_test_env();
     
-    stellar_nebula_nomad::NebulaNomadContract::initialize_scheduler(env.clone(), admin.clone());
+    initialize_scheduler(&env, &admin);
     
     let current_time = env.ledger().timestamp();
     let past_time = current_time - 3600; // 1 hour ago
     
-    let result = stellar_nebula_nomad::NebulaNomadContract::schedule_event(
-        env.clone(),
+    let result = schedule_event(
+        &env,
         admin.clone(),
         symbol_short!("festival"),
         past_time,
@@ -82,13 +84,13 @@ fn test_schedule_event_past_time_fails() {
 fn test_schedule_event_invalid_type_fails() {
     let (env, admin) = create_test_env();
     
-    stellar_nebula_nomad::NebulaNomadContract::initialize_scheduler(env.clone(), admin.clone());
+    initialize_scheduler(&env, &admin);
     
     let current_time = env.ledger().timestamp();
     let start_time = current_time + 3600;
     
-    let result = stellar_nebula_nomad::NebulaNomadContract::schedule_event(
-        env.clone(),
+    let result = schedule_event(
+        &env,
         admin.clone(),
         symbol_short!("invalid"),
         start_time,
@@ -102,13 +104,13 @@ fn test_schedule_event_invalid_type_fails() {
 fn test_trigger_event_success() {
     let (env, admin) = create_test_env();
     
-    stellar_nebula_nomad::NebulaNomadContract::initialize_scheduler(env.clone(), admin.clone());
+    initialize_scheduler(&env, &admin);
     
     let current_time = env.ledger().timestamp();
     let start_time = current_time + 100;
     
-    let event_id = stellar_nebula_nomad::NebulaNomadContract::schedule_event(
-        env.clone(),
+    let event_id = schedule_event(
+        &env,
         admin.clone(),
         symbol_short!("raid"),
         start_time,
@@ -121,8 +123,8 @@ fn test_trigger_event_success() {
         li.timestamp = start_time + 1;
     });
     
-    let result = stellar_nebula_nomad::NebulaNomadContract::trigger_scheduled_event(
-        env.clone(),
+    let result = trigger_scheduled_event(
+        &env,
         event_id,
     )
     .unwrap();
@@ -130,10 +132,10 @@ fn test_trigger_event_success() {
     assert_eq!(result.event_id, event_id);
     assert_eq!(result.rewards_distributed, 5000i128);
     
-    let event = stellar_nebula_nomad::NebulaNomadContract::get_event(env.clone(), event_id).unwrap();
+    let event = get_event(&env, event_id).unwrap();
     assert_eq!(event.executed, true);
     
-    let active = stellar_nebula_nomad::NebulaNomadContract::get_active_events(env.clone());
+    let active = get_active_events(&env);
     assert_eq!(active.len(), 0);
 }
 
@@ -141,13 +143,13 @@ fn test_trigger_event_success() {
 fn test_trigger_event_too_early_fails() {
     let (env, admin) = create_test_env();
     
-    stellar_nebula_nomad::NebulaNomadContract::initialize_scheduler(env.clone(), admin.clone());
+    initialize_scheduler(&env, &admin);
     
     let current_time = env.ledger().timestamp();
     let start_time = current_time + 3600;
     
-    let event_id = stellar_nebula_nomad::NebulaNomadContract::schedule_event(
-        env.clone(),
+    let event_id = schedule_event(
+        &env,
         admin.clone(),
         symbol_short!("harvest"),
         start_time,
@@ -155,8 +157,8 @@ fn test_trigger_event_too_early_fails() {
     )
     .unwrap();
     
-    let result = stellar_nebula_nomad::NebulaNomadContract::trigger_scheduled_event(
-        env.clone(),
+    let result = trigger_scheduled_event(
+        &env,
         event_id,
     );
     
@@ -167,13 +169,13 @@ fn test_trigger_event_too_early_fails() {
 fn test_trigger_event_already_executed_fails() {
     let (env, admin) = create_test_env();
     
-    stellar_nebula_nomad::NebulaNomadContract::initialize_scheduler(env.clone(), admin.clone());
+    initialize_scheduler(&env, &admin);
     
     let current_time = env.ledger().timestamp();
     let start_time = current_time + 100;
     
-    let event_id = stellar_nebula_nomad::NebulaNomadContract::schedule_event(
-        env.clone(),
+    let event_id = schedule_event(
+        &env,
         admin.clone(),
         symbol_short!("pvp"),
         start_time,
@@ -185,11 +187,11 @@ fn test_trigger_event_already_executed_fails() {
         li.timestamp = start_time + 1;
     });
     
-    stellar_nebula_nomad::NebulaNomadContract::trigger_scheduled_event(env.clone(), event_id)
+    trigger_scheduled_event(&env, event_id)
         .unwrap();
     
-    let result = stellar_nebula_nomad::NebulaNomadContract::trigger_scheduled_event(
-        env.clone(),
+    let result = trigger_scheduled_event(
+        &env,
         event_id,
     );
     
@@ -200,19 +202,19 @@ fn test_trigger_event_already_executed_fails() {
 fn test_schedule_weekly_festival() {
     let (env, admin) = create_test_env();
     
-    stellar_nebula_nomad::NebulaNomadContract::initialize_scheduler(env.clone(), admin.clone());
+    initialize_scheduler(&env, &admin);
     
     let current_time = env.ledger().timestamp();
     let reward_pool = 50000i128;
     
-    let event_id = stellar_nebula_nomad::NebulaNomadContract::schedule_weekly_festival(
-        env.clone(),
+    let event_id = schedule_weekly_festival(
+        &env,
         admin.clone(),
         reward_pool,
     )
     .unwrap();
     
-    let event = stellar_nebula_nomad::NebulaNomadContract::get_event(env.clone(), event_id).unwrap();
+    let event = get_event(&env, event_id).unwrap();
     assert_eq!(event.event_type, symbol_short!("festival"));
     assert_eq!(event.start_time, current_time + WEEKLY_FESTIVAL_INTERVAL);
     assert_eq!(event.reward_pool, reward_pool);
@@ -222,13 +224,13 @@ fn test_schedule_weekly_festival() {
 fn test_cancel_event() {
     let (env, admin) = create_test_env();
     
-    stellar_nebula_nomad::NebulaNomadContract::initialize_scheduler(env.clone(), admin.clone());
+    initialize_scheduler(&env, &admin);
     
     let current_time = env.ledger().timestamp();
     let start_time = current_time + 3600;
     
-    let event_id = stellar_nebula_nomad::NebulaNomadContract::schedule_event(
-        env.clone(),
+    let event_id = schedule_event(
+        &env,
         admin.clone(),
         symbol_short!("explore"),
         start_time,
@@ -236,17 +238,17 @@ fn test_cancel_event() {
     )
     .unwrap();
     
-    stellar_nebula_nomad::NebulaNomadContract::cancel_event(
-        env.clone(),
+    cancel_event(
+        &env,
         admin.clone(),
         event_id,
     )
     .unwrap();
     
-    let event = stellar_nebula_nomad::NebulaNomadContract::get_event(env.clone(), event_id).unwrap();
+    let event = get_event(&env, event_id).unwrap();
     assert_eq!(event.executed, true);
     
-    let active = stellar_nebula_nomad::NebulaNomadContract::get_active_events(env.clone());
+    let active = get_active_events(&env);
     assert_eq!(active.len(), 0);
 }
 
@@ -254,15 +256,15 @@ fn test_cancel_event() {
 fn test_multiple_events() {
     let (env, admin) = create_test_env();
     
-    stellar_nebula_nomad::NebulaNomadContract::initialize_scheduler(env.clone(), admin.clone());
+    initialize_scheduler(&env, &admin);
     
     let current_time = env.ledger().timestamp();
     
     // Schedule 5 events
     for i in 1..=5 {
         let start_time = current_time + (i * 1000);
-        stellar_nebula_nomad::NebulaNomadContract::schedule_event(
-            env.clone(),
+        schedule_event(
+            &env,
             admin.clone(),
             symbol_short!("festival"),
             start_time,
@@ -271,10 +273,10 @@ fn test_multiple_events() {
         .unwrap();
     }
     
-    let count = stellar_nebula_nomad::NebulaNomadContract::get_event_count(env.clone());
+    let count = get_event_count(&env);
     assert_eq!(count, 5);
     
-    let active = stellar_nebula_nomad::NebulaNomadContract::get_active_events(env.clone());
+    let active = get_active_events(&env);
     assert_eq!(active.len(), 5);
 }
 
@@ -282,15 +284,15 @@ fn test_multiple_events() {
 fn test_max_active_events_limit() {
     let (env, admin) = create_test_env();
     
-    stellar_nebula_nomad::NebulaNomadContract::initialize_scheduler(env.clone(), admin.clone());
+    initialize_scheduler(&env, &admin);
     
     let current_time = env.ledger().timestamp();
     
     // Schedule MAX_ACTIVE_EVENTS events
     for i in 1..=MAX_ACTIVE_EVENTS {
         let start_time = current_time + (i as u64 * 1000);
-        stellar_nebula_nomad::NebulaNomadContract::schedule_event(
-            env.clone(),
+        schedule_event(
+            &env,
             admin.clone(),
             symbol_short!("raid"),
             start_time,
@@ -300,8 +302,8 @@ fn test_max_active_events_limit() {
     }
     
     // Try to schedule one more - should fail
-    let result = stellar_nebula_nomad::NebulaNomadContract::schedule_event(
-        env.clone(),
+    let result = schedule_event(
+        &env,
         admin.clone(),
         symbol_short!("raid"),
         current_time + 100000,
@@ -315,13 +317,13 @@ fn test_max_active_events_limit() {
 fn test_update_participants() {
     let (env, admin) = create_test_env();
     
-    stellar_nebula_nomad::NebulaNomadContract::initialize_scheduler(env.clone(), admin.clone());
+    initialize_scheduler(&env, &admin);
     
     let current_time = env.ledger().timestamp();
     let start_time = current_time + 3600;
     
-    let event_id = stellar_nebula_nomad::NebulaNomadContract::schedule_event(
-        env.clone(),
+    let event_id = schedule_event(
+        &env,
         admin.clone(),
         symbol_short!("pvp"),
         start_time,
@@ -329,14 +331,14 @@ fn test_update_participants() {
     )
     .unwrap();
     
-    stellar_nebula_nomad::NebulaNomadContract::update_event_participants(
-        env.clone(),
+    update_participants(
+        &env,
         event_id,
         42,
     )
     .unwrap();
     
-    let event = stellar_nebula_nomad::NebulaNomadContract::get_event(env.clone(), event_id).unwrap();
+    let event = get_event(&env, event_id).unwrap();
     assert_eq!(event.participants, 42);
 }
 
@@ -345,14 +347,14 @@ fn test_event_lifecycle() {
     let (env, admin) = create_test_env();
     
     // Initialize
-    stellar_nebula_nomad::NebulaNomadContract::initialize_scheduler(env.clone(), admin.clone());
+    initialize_scheduler(&env, &admin);
     
     let current_time = env.ledger().timestamp();
     let start_time = current_time + 1000;
     
     // Schedule
-    let event_id = stellar_nebula_nomad::NebulaNomadContract::schedule_event(
-        env.clone(),
+    let event_id = schedule_event(
+        &env,
         admin.clone(),
         symbol_short!("festival"),
         start_time,
@@ -361,8 +363,8 @@ fn test_event_lifecycle() {
     .unwrap();
     
     // Update participants
-    stellar_nebula_nomad::NebulaNomadContract::update_event_participants(
-        env.clone(),
+    update_participants(
+        &env,
         event_id,
         100,
     )
@@ -374,8 +376,8 @@ fn test_event_lifecycle() {
     });
     
     // Trigger
-    let result = stellar_nebula_nomad::NebulaNomadContract::trigger_scheduled_event(
-        env.clone(),
+    let result = trigger_scheduled_event(
+        &env,
         event_id,
     )
     .unwrap();
@@ -385,7 +387,7 @@ fn test_event_lifecycle() {
     assert_eq!(result.participants, 100);
     
     // Verify executed
-    let event = stellar_nebula_nomad::NebulaNomadContract::get_event(env.clone(), event_id).unwrap();
+    let event = get_event(&env, event_id).unwrap();
     assert_eq!(event.executed, true);
 }
 
@@ -393,7 +395,7 @@ fn test_event_lifecycle() {
 fn test_all_event_types() {
     let (env, admin) = create_test_env();
     
-    stellar_nebula_nomad::NebulaNomadContract::initialize_scheduler(env.clone(), admin.clone());
+    initialize_scheduler(&env, &admin);
     
     let current_time = env.ledger().timestamp();
     let event_types = [
@@ -406,8 +408,8 @@ fn test_all_event_types() {
     
     for (i, event_type) in event_types.iter().enumerate() {
         let start_time = current_time + ((i as u64 + 1) * 1000);
-        let event_id = stellar_nebula_nomad::NebulaNomadContract::schedule_event(
-            env.clone(),
+        let event_id = schedule_event(
+            &env,
             admin.clone(),
             event_type.clone(),
             start_time,
@@ -415,7 +417,7 @@ fn test_all_event_types() {
         )
         .unwrap();
         
-        let event = stellar_nebula_nomad::NebulaNomadContract::get_event(env.clone(), event_id).unwrap();
+        let event = get_event(&env, event_id).unwrap();
         assert_eq!(event.event_type, *event_type);
     }
 }
