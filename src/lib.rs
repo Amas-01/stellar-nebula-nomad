@@ -37,6 +37,7 @@ mod audit_logger;
 mod sustainability_metrics;
 mod anomaly_classifier;
 mod shared_lib;
+mod composability_examples;
 
 mod storage_optim;
 mod state_snapshot;
@@ -123,6 +124,12 @@ pub use audit_logger::{AuditEntry, AuditLoggerError, get_audit_count, log_audit_
 pub use sustainability_metrics::{claim_sustainability_reward, get_footprint, record_transaction_footprint, FootprintRecord, SustainabilityError};
 pub use anomaly_classifier::{classify_anomaly, classify_batch, get_classification, refine_classification, AnomalyError, ClassificationRecord};
 pub use shared_lib::{calculate_yield, validate_address, SharedError};
+
+pub use composability_examples::{
+    compose_with_external_contract, validate_composable_response, batch_compose,
+    sanitize_input, emit_batch_summary, record_composition_gas, get_last_composition_gas,
+    CompositionBuilder, ComposableResponse, ComposabilityError,
+};
 
 pub use storage_optim::{
     store_with_bump, get_optimized_entry, batch_store_with_bump, guard_reentrancy,
@@ -1230,5 +1237,35 @@ impl NebulaNomadContract {
     /// Return total messages sent over a pair.
     pub fn get_message_count(env: Env, pair_id: u64) -> u64 {
         entanglement_comms::get_message_count(&env, pair_id)
+    }
+
+    // ─── Contract Composability API (Issue #86) ──────────────────────────
+
+    /// Standardized cross-contract caller with input sanitization.
+    pub fn compose_with_external_contract(
+        env: Env,
+        target: Address,
+        method: Symbol,
+        args: Bytes,
+    ) -> Result<ComposableResponse, ComposabilityError> {
+        composability_examples::compose_with_external_contract(&env, &target, method, &args)
+    }
+
+    /// Validate a composable response.
+    pub fn validate_composable_response(env: Env, response: BytesN<64>) -> Result<bool, ComposabilityError> {
+        composability_examples::validate_composable_response(&env, &response)
+    }
+
+    /// Batch composition - call multiple contracts in sequence.
+    pub fn batch_compose(
+        env: Env,
+        calls: Vec<(Address, Symbol, Bytes)>,
+    ) -> Vec<ComposableResponse> {
+        composability_examples::batch_compose(&env, calls)
+    }
+
+    /// Get the last composition gas used.
+    pub fn get_last_composition_gas(env: Env) -> u64 {
+        composability_examples::get_last_composition_gas(&env)
     }
 }
