@@ -13,6 +13,7 @@ mod ship_registry;
 
 mod dex_integration;
 mod difficulty_scaler;
+pub mod mobile_views;
 mod randomness_oracle;
 pub mod ship_upgrade;
 mod treasure_vault;
@@ -40,6 +41,7 @@ pub use difficulty_scaler::{
 pub use randomness_oracle::{
     get_entropy_pool, request_random_seed, verify_and_fallback, OracleError,
 };
+pub use mobile_views::{get_mobile_dashboard, get_quick_scan_preview, MobileDashboard, MobileViewError, QuickScanPreview};
 pub use ship_upgrade::{ShipState, ShipUpgradeError, UpgradeBlueprint};
 pub use treasure_vault::{
     claim_treasure, deposit_treasure, get_vault, TreasureVault, VaultError,
@@ -373,5 +375,28 @@ impl NebulaNomadContract {
     /// Read the current upgrade state of a ship.
     pub fn get_ship_state(env: Env, ship_id: u64) -> Option<ShipState> {
         ship_upgrade::get_ship_state(&env, ship_id)
+    }
+
+    // ─── Mobile Views (Issue #65) ─────────────────────────────────────────
+
+    /// Return a compact dashboard summary for `player` — ship stats, profile
+    /// totals, and the three primary resource balances — in a single call.
+    ///
+    /// Pure read-only. Always returns a valid struct; missing data defaults to
+    /// zero, enabling graceful empty-state rendering on mobile frontends.
+    pub fn get_mobile_dashboard(env: Env, player: Address) -> MobileDashboard {
+        mobile_views::get_mobile_dashboard(&env, &player)
+    }
+
+    /// Return a lightweight scan-result preview for `ship_id` without
+    /// generating a full 256-cell nebula layout.
+    ///
+    /// Pure read-only. Returns `MobileViewError::ShipNotFound` if `ship_id`
+    /// does not exist.
+    pub fn get_quick_scan_preview(
+        env: Env,
+        ship_id: u64,
+    ) -> Result<QuickScanPreview, MobileViewError> {
+        mobile_views::get_quick_scan_preview(&env, ship_id)
     }
 }
