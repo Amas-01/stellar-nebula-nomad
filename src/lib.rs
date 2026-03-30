@@ -18,6 +18,7 @@ mod difficulty_scaler;
 mod emergency_controls;
 mod metadata_resolver;
 mod randomness_oracle;
+pub mod ship_upgrade;
 mod treasure_vault;
 
 mod yield_farming;
@@ -38,6 +39,7 @@ mod audit_logger;
 mod sustainability_metrics;
 mod anomaly_classifier;
 mod shared_lib;
+mod yield_forecast;
 
 mod storage_optim;
 mod state_snapshot;
@@ -51,6 +53,7 @@ mod alliance_manager;
 mod market_oracle;
 mod audio_seed_generator;
 mod privacy_stats;
+mod navigation_planner;
 
 pub use nebula_explorer::{
     calculate_rarity_tier, compute_layout_hash, generate_nebula_layout, CellType, NebulaCell,
@@ -87,6 +90,8 @@ pub use metadata_resolver::{
 pub use randomness_oracle::{
     get_entropy_pool, request_random_seed, verify_and_fallback, OracleError,
 };
+pub use mobile_views::{get_mobile_dashboard, get_quick_scan_preview, MobileDashboard, MobileViewError, QuickScanPreview};
+pub use ship_upgrade::{ShipState, ShipUpgradeError, UpgradeBlueprint};
 pub use treasure_vault::{
     claim_treasure, deposit_treasure, get_vault, TreasureVault, VaultError,
     DEFAULT_MIN_LOCK_DURATION,
@@ -130,6 +135,14 @@ pub use audit_logger::{AuditEntry, AuditLoggerError, get_audit_count, log_audit_
 pub use sustainability_metrics::{claim_sustainability_reward, get_footprint, record_transaction_footprint, FootprintRecord, SustainabilityError};
 pub use anomaly_classifier::{classify_anomaly, classify_batch, get_classification, refine_classification, AnomalyError, ClassificationRecord};
 pub use shared_lib::{calculate_yield, validate_address, SharedError};
+
+pub use yield_forecast::{
+    initialize as initialize_forecast, generate_yield_forecast, update_forecast_model,
+    batch_generate_forecasts, get_cached_forecast, get_player_history, get_history_count,
+    get_model_params, get_model_version, update_model_params, clear_stale_forecasts,
+    YieldDataPoint, YieldForecast, ModelParams, ForecastError,
+    MAX_HISTORY_POINTS, MAX_FORECAST_DAYS, MAX_FORECAST_BURST,
+};
 
 pub use storage_optim::{
     store_with_bump, get_optimized_entry, batch_store_with_bump, guard_reentrancy,
@@ -189,6 +202,11 @@ pub use privacy_stats::{
     opt_in_privacy, commit_private_stat, verify_private_stat, get_commitment,
     get_commitment_count, batch_commit_stats, is_opted_in, reset_burst_counter as reset_privacy_burst,
     StatCommitment, PrivacyError, MAX_COMMITMENTS_PER_TX,
+};
+pub use navigation_planner::{
+    initialize_nav_graph, add_nebula_connection, add_nebula_connections_batch,
+    calculate_optimal_route, validate_route_safety, get_neighbors, get_connection,
+    NavError, NavPath, RouteEdge, NavConfig, MAX_ROUTE_HOPS, MAX_CONNECTIONS_PER_BATCH,
 };
 
 #[contract]
@@ -1279,6 +1297,73 @@ impl NebulaNomadContract {
         entanglement_comms::get_message_count(&env, pair_id)
     }
 
+    // ─── Yield Forecasting API (Issue #90) ─────────────────────────────────
+
+    /// Initialize the yield forecasting system.
+    pub fn initialize_forecast(env: Env, admin: Address) -> Result<(), ForecastError> {
+        yield_forecast::initialize(&env, &admin)
+    }
+
+    /// Generate a yield forecast for a player.
+    pub fn generate_yield_forecast(
+        env: Env,
+        player: Address,
+        days: u32,
+    ) -> Result<YieldForecast, ForecastError> {
+        yield_forecast::generate_yield_forecast(&env, &player, days)
+    }
+
+    /// Update the forecast model with new data.
+    pub fn update_forecast_model(
+        env: Env,
+        player: Address,
+        data_point: YieldDataPoint,
+    ) -> Result<ModelParams, ForecastError> {
+        yield_forecast::update_forecast_model(&env, &player, data_point)
+    }
+
+    /// Batch generate forecasts for multiple players.
+    pub fn batch_generate_forecasts(
+        env: Env,
+        players: Vec<(Address, u32)>,
+    ) -> Vec<Result<YieldForecast, ForecastError>> {
+        yield_forecast::batch_generate_forecasts(&env, players)
+    }
+
+    /// Get cached forecast for a player.
+    pub fn get_cached_forecast(env: Env, player: Address) -> Option<YieldForecast> {
+        yield_forecast::get_cached_forecast(&env, &player)
+    }
+
+    /// Get historical data for a player.
+    pub fn get_player_history(env: Env, player: Address) -> Vec<YieldDataPoint> {
+        yield_forecast::get_player_history(&env, &player)
+    }
+
+    /// Get number of historical data points for a player.
+    pub fn get_history_count(env: Env, player: Address) -> u32 {
+        yield_forecast::get_history_count(&env, &player)
+    }
+
+    /// Get current model parameters.
+    pub fn get_model_params(env: Env) -> Option<ModelParams> {
+        yield_forecast::get_model_params(&env)
+    }
+
+    /// Get current model version.
+    pub fn get_model_version(env: Env) -> u32 {
+        yield_forecast::get_model_version(&env)
+    }
+
+    /// Update model parameters (admin only).
+    pub fn update_model_params(
+        env: Env,
+        admin: Address,
+        moving_average_window: u32,
+        trend_weight: u32,
+        volatility_adjustment: u32,
+    ) -> Result<ModelParams, ForecastError> {
+        yield_forecast::update_model_params(&env, &admin, moving_average_window, trend_weight, volatility_adjustment)
     // ─── Inter-Nebula Wormhole Travel System (Issue #77) ─────────────────────
 
     /// Open a new wormhole between two nebulae with verifiable travel link.
@@ -1513,6 +1598,7 @@ impl NebulaNomadContract {
         audio_seed_generator::get_preset(&env, preset_id)
     }
 
+
     // ─── Privacy-Preserving Player Stats (Issue #XX) ─────────────────────
 
     /// Opt in to privacy-preserving stat sharing.
@@ -1571,5 +1657,58 @@ impl NebulaNomadContract {
     /// Reset privacy burst counter for a new transaction.
     pub fn reset_privacy_burst_counter(env: Env) {
         privacy_stats::reset_burst_counter(&env)
+    }
+
+    // ─── Nebula Navigation Route Planner (Issue #69) ──────────────────────────
+
+    /// Initialise the nebula navigation graph with an admin address.
+    pub fn initialize_nav_graph(env: Env, admin: Address) -> Result<(), NavError> {
+        navigation_planner::initialize_nav_graph(&env, &admin)
+    }
+
+    /// Register a directed edge (connection) between two nebulae.
+    pub fn add_nebula_connection(
+        env: Env,
+        admin: Address,
+        from: u64,
+        to: u64,
+        fuel_cost: u32,
+        hazard_level: u32,
+    ) -> Result<(), NavError> {
+        navigation_planner::add_nebula_connection(&env, &admin, from, to, fuel_cost, hazard_level)
+    }
+
+    /// Add up to MAX_CONNECTIONS_PER_BATCH edges in a single transaction.
+    pub fn add_nebula_connections_batch(
+        env: Env,
+        admin: Address,
+        edges: Vec<RouteEdge>,
+    ) -> Result<u32, NavError> {
+        navigation_planner::add_nebula_connections_batch(&env, &admin, edges)
+    }
+
+    /// Dijkstra shortest-fuel-cost route between two nebulae (≤ 12 hops).
+    /// Emits RouteCalculated event on success.
+    pub fn calculate_optimal_route(
+        env: Env,
+        start: u64,
+        dest: u64,
+    ) -> Result<NavPath, NavError> {
+        navigation_planner::calculate_optimal_route(&env, start, dest)
+    }
+
+    /// Validate a caller-supplied route Vec and return its aggregate risk score.
+    pub fn validate_route_safety(env: Env, route: Vec<u64>) -> Result<u32, NavError> {
+        navigation_planner::validate_route_safety(&env, route)
+    }
+
+    /// Return the adjacency list (outgoing edges) for a nebula.
+    pub fn get_neighbors(env: Env, nebula_id: u64) -> Vec<RouteEdge> {
+        navigation_planner::get_neighbors(&env, nebula_id)
+    }
+
+    /// Return the single directed edge from `from` to `to`, if it exists.
+    pub fn get_nav_connection(env: Env, from: u64, to: u64) -> Option<RouteEdge> {
+        navigation_planner::get_connection(&env, from, to)
     }
 }
