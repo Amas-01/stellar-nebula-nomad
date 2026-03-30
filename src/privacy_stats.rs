@@ -63,9 +63,9 @@ fn compute_commitment_hash(
 ) -> BytesN<32> {
     let mut data = soroban_sdk::Bytes::new(env);
     
-    // Append stat_type bytes
-    let stat_bytes = stat_type.to_string();
-    for i in 0..stat_bytes.len() {
+    // Append stat_type as bytes (convert symbol to bytes)
+    let stat_bytes = env.crypto().sha256(&stat_type.to_val());
+    for i in 0..32 {
         data.push_back(stat_bytes.get(i).unwrap());
     }
     

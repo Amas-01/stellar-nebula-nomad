@@ -54,6 +54,8 @@ mod market_oracle;
 mod audio_seed_generator;
 mod privacy_stats;
 mod navigation_planner;
+mod mobile_views;
+mod config_updater;
 
 pub use nebula_explorer::{
     calculate_rarity_tier, compute_layout_hash, generate_nebula_layout, CellType, NebulaCell,
@@ -1364,6 +1366,8 @@ impl NebulaNomadContract {
         volatility_adjustment: u32,
     ) -> Result<ModelParams, ForecastError> {
         yield_forecast::update_model_params(&env, &admin, moving_average_window, trend_weight, volatility_adjustment)
+    }
+
     // ─── Inter-Nebula Wormhole Travel System (Issue #77) ─────────────────────
 
     /// Open a new wormhole between two nebulae with verifiable travel link.
