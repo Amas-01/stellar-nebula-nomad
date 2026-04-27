@@ -3,6 +3,7 @@
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec, symbol_short};
 
 mod analytics;
+mod metrics;
 mod nebula_explorer;
 pub mod resource_minter;
 mod ship_registry;
@@ -12,7 +13,8 @@ mod event_framework;
 mod fleet_manager;
 mod onboarding_tutorial;
 
-pub use analytics::{AnalyticsError, GlobalStats, LeaderboardEntry};
+pub use analytics::{AnalyticsError, GlobalStats, LeaderboardEntry, LeaderboardSummary};
+pub use metrics::{AdvancedMetricsSnapshot, MetricsError};
 
 mod blueprint_factory;
 mod gifting_system;
@@ -510,6 +512,15 @@ impl NebulaNomadContract {
     /// Pure view — no ledger writes, zero gas cost beyond the read.
     pub fn get_global_stats(env: Env) -> GlobalStats {
         analytics::get_global_stats(&env)
+    }
+
+    /// Admin-only aggregated metrics snapshot for analytics dashboards (Issue #129).
+    ///
+    /// Combines gameplay, referrals, health telemetry, audit counts, and economic
+    /// ratios into one struct (50+ numeric fields). Caller must authenticate and
+    /// appear in [`get_admins`].
+    pub fn get_advanced_metrics(env: Env, caller: Address) -> Result<AdvancedMetricsSnapshot, MetricsError> {
+        metrics::get_advanced_metrics(&env, &caller)
     }
 
     /// Return the top-`top_n` explorers sorted by cumulative cosmic essence.
