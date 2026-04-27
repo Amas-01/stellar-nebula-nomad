@@ -85,8 +85,7 @@ fn compute_commitment_hash(
     }
     
     // Use Soroban's built-in hash function and convert to BytesN
-    let hash = env.crypto().sha256(&data);
-    BytesN::from_array(env, &hash.to_array())
+    BytesN::from_array(env, &env.crypto().sha256(&data).to_array())
 }
 
 /// Verify a proof against a commitment.

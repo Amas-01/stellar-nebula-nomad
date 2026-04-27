@@ -65,7 +65,8 @@ pub struct StakeRecord {
 }
 
 #[contracterror]
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
 pub enum HarvestError {
     ShipNotFound = 1,
     EmptyHarvest = 2,
@@ -425,9 +426,11 @@ impl ResourceMinter {
             return 0;
         }
 
-        let days = elapsed / (LEDGERS_PER_DAY as i128);
-        let base_yield = stake.amount * days;
-        (base_yield * apy_bps as i128) / 10_000
+        let annual_yield = (stake.amount * apy_bps as i128) / 10_000;
+        let daily_yield = annual_yield / 365;
+        let ledger_yield = daily_yield / LEDGERS_PER_DAY as i128;
+
+        ledger_yield * elapsed
     }
 }
 
