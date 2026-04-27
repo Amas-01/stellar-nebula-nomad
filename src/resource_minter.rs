@@ -425,7 +425,7 @@ impl ResourceMinter {
             return 0;
         }
 
-        let days = elapsed / LEDGERS_PER_DAY;
+        let days = elapsed / (LEDGERS_PER_DAY as i128);
         let base_yield = stake.amount * days;
         (base_yield * apy_bps as i128) / 10_000
     }
