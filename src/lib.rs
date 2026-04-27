@@ -94,8 +94,14 @@ mod bridge;
 // ── Issue #116: Rate limiting to prevent spam ──────────────────────────────────
 mod rate_limiter;
 
-// ── Issue #121: Enhanced referral system with tiered rewards ──────────────────
+// ── Issue #121 / #127: Enhanced referral system with tiered rewards ───────────
 mod rewards;
+
+// ── Issue #130: NFT marketplace integration ───────────────────────────────────
+mod nft_marketplace;
+
+// ── Issue #141: Advanced trading — limit orders and trading history ───────────
+mod trading;
 
 // ── Issues #113 / #114: Upgradeable contract pattern ─────────────────────────
 mod proxy;
@@ -121,6 +127,9 @@ pub use resource_minter::{
 pub use ship_nft::{ShipError, ShipNft};
 pub use blueprint_factory::{Blueprint, BlueprintError, BlueprintRarity};
 pub use referral_system::{Referral, ReferralError};
+pub use rewards::{LeaderboardEntry as ReferralLeaderboardEntry, ReferralAnalytics, ReferrerStats, RewardError};
+pub use nft_marketplace::{Listing, MarketplaceError};
+pub use trading::{LimitOrder, OrderSide, TradeRecord, TradingError};
 pub use player_profile::{PlayerProfile, ProfileError, ProgressUpdate};
 pub use session_manager::{Session, SessionError};
 pub use ship_registry::Ship;
@@ -401,7 +410,7 @@ impl NebulaNomadContract {
         approval_threshold: u32,
         high_value_threshold: i128,
         timelock_seconds: u64,
-    ) -> Result<(), BountyError> {
+    ) -> Result<(), BountyPayoutError> {
         bug_bounty_payout::init_bounty_engine(
             &env,
             &admin,
@@ -412,7 +421,7 @@ impl NebulaNomadContract {
         )
     }
 
-    pub fn fund_bounty_pool(env: Env, admin: Address, amount: i128) -> Result<i128, BountyError> {
+    pub fn fund_bounty_pool(env: Env, admin: Address, amount: i128) -> Result<i128, BountyPayoutError> {
         bug_bounty_payout::fund_bounty_pool(&env, &admin, amount)
     }
 
@@ -421,7 +430,7 @@ impl NebulaNomadContract {
         reporter: Address,
         description: soroban_sdk::String,
         severity: soroban_sdk::Symbol,
-    ) -> Result<u64, BountyError> {
+    ) -> Result<u64, BountyPayoutError> {
         bug_bounty_payout::submit_bug_report(&env, &reporter, description, severity)
     }
 
@@ -430,7 +439,7 @@ impl NebulaNomadContract {
         approver: Address,
         report_id: u64,
         amount: i128,
-    ) -> Result<bool, BountyError> {
+    ) -> Result<bool, BountyPayoutError> {
         bug_bounty_payout::approve_and_pay_bounty(&env, &approver, report_id, amount)
     }
 
@@ -439,11 +448,11 @@ impl NebulaNomadContract {
         approver: Address,
         report_ids: soroban_sdk::Vec<u64>,
         amounts: soroban_sdk::Vec<i128>,
-    ) -> Result<u32, BountyError> {
+    ) -> Result<u32, BountyPayoutError> {
         bug_bounty_payout::approve_and_pay_bounty_burst(&env, &approver, report_ids, amounts)
     }
 
-    pub fn set_emergency_pause(env: Env, admin: Address, paused: bool) -> Result<(), BountyError> {
+    pub fn set_emergency_pause(env: Env, admin: Address, paused: bool) -> Result<(), BountyPayoutError> {
         bug_bounty_payout::set_emergency_pause(&env, &admin, paused)
     }
 
@@ -451,7 +460,7 @@ impl NebulaNomadContract {
         env: Env,
         admin: Address,
         enabled: bool,
-    ) -> Result<(), BountyError> {
+    ) -> Result<(), BountyPayoutError> {
         bug_bounty_payout::set_community_voted_mode(&env, &admin, enabled)
     }
 
@@ -2312,5 +2321,159 @@ impl NebulaNomadContract {
     /// Return the single directed edge from `from` to `to`, if it exists.
     pub fn get_nav_connection(env: Env, from: u64, to: u64) -> Option<RouteEdge> {
         navigation_planner::get_connection(&env, from, to)
+    }
+
+    // ── Issue #127: Enhanced referral system with tiered rewards ──────────────
+
+    /// Generate a unique 8-byte referral code for `referrer`.
+    pub fn generate_referral_code(env: Env, referrer: Address) -> Result<soroban_sdk::BytesN<8>, RewardError> {
+        rewards::generate_referral_code(&env, &referrer)
+    }
+
+    /// Record a referral: `referrer` referred `new_nomad` (rewards the referrer).
+    pub fn record_referral(
+        env: Env,
+        referrer: Address,
+        new_nomad: Address,
+    ) -> Result<i128, RewardError> {
+        rewards::record_referral(&env, &referrer, &new_nomad)
+    }
+
+    /// Mark a referred nomad as active (completed their first scan).
+    pub fn mark_referral_active(env: Env, referrer: Address) -> Result<(), RewardError> {
+        rewards::mark_referral_active(&env, &referrer)
+    }
+
+    /// Claim tiered referral rewards based on the number of active referrals.
+    pub fn claim_tiered_rewards(env: Env, referrer: Address) -> Result<i128, RewardError> {
+        rewards::claim_rewards(&env, &referrer)
+    }
+
+    /// Return the referrer stats (tier, active count, total claimed).
+    pub fn get_referrer_stats(env: Env, referrer: Address) -> Option<ReferrerStats> {
+        rewards::get_referrer_stats(&env, &referrer)
+    }
+
+    /// Resolve a referral code to the referrer address.
+    pub fn get_referrer_by_code(env: Env, code: soroban_sdk::BytesN<8>) -> Option<Address> {
+        rewards::get_referrer_by_code(&env, &code)
+    }
+
+    /// Return the top-10 referral leaderboard.
+    pub fn get_referral_leaderboard(env: Env) -> soroban_sdk::Vec<rewards::LeaderboardEntry> {
+        rewards::get_leaderboard(&env)
+    }
+
+    /// Return global referral analytics.
+    pub fn get_referral_analytics(env: Env) -> ReferralAnalytics {
+        rewards::get_referral_analytics(&env)
+    }
+
+    /// Flag an address as suspicious (admin only, anti-gaming).
+    pub fn flag_suspicious_referrer(
+        env: Env,
+        admin: Address,
+        target: Address,
+    ) -> Result<(), RewardError> {
+        rewards::flag_suspicious(&env, &admin, &target)
+    }
+
+    // ── Issue #130: NFT marketplace integration ───────────────────────────────
+
+    /// List a ship NFT for sale on the marketplace.
+    pub fn list_ship_for_sale(
+        env: Env,
+        seller: Address,
+        ship_id: u64,
+        price: i128,
+    ) -> Result<(), nft_marketplace::MarketplaceError> {
+        nft_marketplace::list_ship(&env, &seller, ship_id, price)
+    }
+
+    /// Buy a listed ship NFT, transferring ownership and enforcing royalties.
+    pub fn buy_ship(
+        env: Env,
+        buyer: Address,
+        ship_id: u64,
+    ) -> Result<(), nft_marketplace::MarketplaceError> {
+        nft_marketplace::buy_ship(&env, &buyer, ship_id)
+    }
+
+    /// Cancel a ship NFT listing.
+    pub fn cancel_ship_listing(
+        env: Env,
+        seller: Address,
+        ship_id: u64,
+    ) -> Result<(), nft_marketplace::MarketplaceError> {
+        nft_marketplace::cancel_listing(&env, &seller, ship_id)
+    }
+
+    /// Get a marketplace listing for a ship.
+    pub fn get_ship_listing(env: Env, ship_id: u64) -> Option<nft_marketplace::Listing> {
+        nft_marketplace::get_listing(&env, ship_id)
+    }
+
+    // ── Issue #141: Advanced trading — limit orders and market depth ──────────
+
+    /// Place a limit order (buy or sell a resource at a specified price).
+    pub fn place_limit_order(
+        env: Env,
+        trader: Address,
+        order: trading::LimitOrder,
+    ) -> Result<u64, trading::TradingError> {
+        trading::place_limit_order(&env, &trader, order)
+    }
+
+    /// Cancel an open limit order.
+    pub fn cancel_limit_order(
+        env: Env,
+        trader: Address,
+        order_id: u64,
+    ) -> Result<(), trading::TradingError> {
+        trading::cancel_limit_order(&env, &trader, order_id)
+    }
+
+    /// Get a limit order by ID.
+    pub fn get_limit_order(env: Env, order_id: u64) -> Option<trading::LimitOrder> {
+        trading::get_limit_order(&env, order_id)
+    }
+
+    /// Return open orders for a trader.
+    pub fn get_trader_orders(env: Env, trader: Address) -> soroban_sdk::Vec<trading::LimitOrder> {
+        trading::get_trader_orders(&env, &trader)
+    }
+
+    /// Record a completed trade in the trading history.
+    pub fn record_trade(
+        env: Env,
+        caller: Address,
+        trade: trading::TradeRecord,
+    ) -> Result<(), trading::TradingError> {
+        trading::record_trade(&env, &caller, trade)
+    }
+
+    /// Retrieve recent trading history (up to 50 records).
+    pub fn get_trading_history(env: Env) -> soroban_sdk::Vec<trading::TradeRecord> {
+        trading::get_trading_history(&env)
+    }
+
+    // ── Issue #142: Event indexing hooks ─────────────────────────────────────
+
+    /// Register a new indexer callback ID for off-chain event consumers.
+    pub fn register_indexer(
+        env: Env,
+        caller: Address,
+        callback_id: soroban_sdk::Symbol,
+    ) -> Result<(), indexer_callbacks::IndexerError> {
+        indexer_callbacks::register_indexer_callback(env, caller, callback_id)
+    }
+
+    /// Emit a structured indexer event (used by the off-chain event service).
+    pub fn emit_indexer_event(
+        env: Env,
+        event_type: soroban_sdk::Symbol,
+        payload: soroban_sdk::BytesN<256>,
+    ) -> Result<(), indexer_callbacks::IndexerError> {
+        indexer_callbacks::trigger_indexer_event(env, event_type, payload)
     }
 }
