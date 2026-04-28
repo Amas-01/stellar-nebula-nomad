@@ -72,6 +72,10 @@ mod trading;
 mod seasons;
 mod battle_pass;
 
+// Gas optimization modules
+mod gas_optimized_storage;
+mod gas_optimized_compute;
+
 pub use analytics::{AnalyticsError, GlobalStats, LeaderboardEntry};
 pub use nebula_explorer::{
     calculate_rarity_tier, compute_layout_hash, generate_nebula_layout, CellType, NebulaCell,
