@@ -66,6 +66,12 @@ mod privacy_stats;
 mod navigation_planner;
 mod event_scheduler;
 
+mod rewards;
+mod nft_marketplace;
+mod trading;
+mod seasons;
+mod battle_pass;
+
 pub use analytics::{AnalyticsError, GlobalStats, LeaderboardEntry};
 pub use nebula_explorer::{
     calculate_rarity_tier, compute_layout_hash, generate_nebula_layout, CellType, NebulaCell,
@@ -79,9 +85,6 @@ pub use resource_minter::{
 pub use ship_nft::{ShipError, ShipNft};
 pub use blueprint_factory::{Blueprint, BlueprintError, BlueprintRarity};
 pub use referral_system::{Referral, ReferralError};
-pub use rewards::{LeaderboardEntry as ReferralLeaderboardEntry, ReferralAnalytics, ReferrerStats, RewardError};
-pub use nft_marketplace::{Listing, MarketplaceError};
-pub use trading::{LimitOrder, OrderSide, TradeRecord, TradingError};
 pub use player_profile::{PlayerProfile, ProfileError, ProgressUpdate};
 pub use session_manager::{Session, SessionError};
 pub use ship_registry::Ship;
@@ -275,13 +278,6 @@ impl NebulaNomadContract {
         // Record analytics: use total_energy as the essence earned this scan.
         analytics::record_scan(&env, &player, layout.total_energy as u64);
 
-        // Update seasonal participation and battle pass XP
-        let profile_result = player_profile::get_profile_by_owner(&env, &player);
-        if let Ok(profile) = profile_result {
-            let _ = seasons::record_participation(&env, profile.id, 1, layout.total_energy as i128);
-            let _ = battle_pass::add_xp(&env, profile.id, 1, layout.total_energy as i128);
-        }
-
         (layout, rarity)
     }
 
@@ -290,15 +286,6 @@ impl NebulaNomadContract {
     /// Pure view — no ledger writes, zero gas cost beyond the read.
     pub fn get_global_stats(env: Env) -> GlobalStats {
         analytics::get_global_stats(&env)
-    }
-
-    /// Admin-only aggregated metrics snapshot for analytics dashboards (Issue #129).
-    ///
-    /// Combines gameplay, referrals, health telemetry, audit counts, and economic
-    /// ratios into one struct (50+ numeric fields). Caller must authenticate and
-    /// appear in [`get_admins`].
-    pub fn get_advanced_metrics(env: Env, caller: Address) -> Result<AdvancedMetricsSnapshot, MetricsError> {
-        metrics::get_advanced_metrics(&env, &caller)
     }
 
     /// Return the top-`top_n` explorers sorted by cumulative cosmic essence.
